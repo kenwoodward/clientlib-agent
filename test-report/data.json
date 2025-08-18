@@ -1,0 +1,45 @@
+{
+  "aemData": {
+    "page": {
+      "path": "/content/test",
+      "componentsUsed": []
+    },
+    "template": {
+      "allowedComponents": [],
+      "policies": {}
+    },
+    "pagesByTemplate": {
+      "pagePaths": []
+    }
+  },
+  "repoData": {
+    "clientlibs": [],
+    "htlInclusions": [],
+    "templateCategoryRefs": [],
+    "dependencyGraph": {
+      "nodes": [],
+      "edges": [],
+      "circular": [],
+      "unused": [],
+      "duplicates": []
+    }
+  },
+  "correlated": {
+    "componentToCategories": {},
+    "missingCategories": []
+  },
+  "recommendation": {
+    "prioritizedSteps": [
+      {
+        "title": "Configure OPENAI_API_KEY to enable LLM recommendations",
+        "rationale": "No API key detected",
+        "impact": "low"
+      }
+    ],
+    "proposedCategories": [],
+    "policyUpdates": [],
+    "risks": [
+      "LLM not executed; using static fallback"
+    ]
+  }
+}
