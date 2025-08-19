@@ -37,7 +37,11 @@ export async function analyzeRepository({ repoRoot, clientlibsCsv }: { repoRoot:
   console.log(`Scanning repository: ${repoRoot}`);
 
   // 1. Find client library folders by scanning for .content.xml files with cq:ClientLibraryFolder
-  const contentXmlFiles = await fg(['**/ui.apps/jcr_root/**/.content.xml', '**/ui.frontend/**/.content.xml'], { 
+  const contentXmlFiles = await fg([
+    '**/ui.apps/**/jcr_root/**/.content.xml', 
+    '**/ui.frontend/**/.content.xml',
+    '**/jcr_root/**/.content.xml'
+  ], { 
     cwd: repoRoot, 
     dot: false, 
     ignore: ['node_modules/**', 'target/**', 'dist/**'] 
@@ -126,27 +130,40 @@ async function parseClientLibraryFolder(repoRoot: string, xmlFilePath: string): 
   const result = await parser.parseStringPromise(content);
   const jcrRoot = result['jcr:root'];
   
-  if (!jcrRoot || jcrRoot['jcr:primaryType'] !== 'cq:ClientLibraryFolder') {
+  if (!jcrRoot) {
+    return null;
+  }
+
+  // Attributes are stored in the $ property when using xml2js
+  const attributes = jcrRoot.$ || jcrRoot;
+  
+  if (!attributes || attributes['jcr:primaryType'] !== 'cq:ClientLibraryFolder') {
     return null;
   }
 
   const clientLibFolder = dirname(xmlFilePath);
-  const category = jcrRoot.categories || '';
-  const embeds = parseStringArray(jcrRoot.embed);
-  const dependencies = parseStringArray(jcrRoot.dependencies);
+  const category = attributes.categories || '';
+  const embeds = parseStringArray(attributes.embed);
+  const dependencies = parseStringArray(attributes.dependencies);
   
   // Scan for JS and CSS assets in the client library folder
   const assets = await scanClientLibAssets(repoRoot, clientLibFolder);
 
+  // Clean up category format (remove brackets if present)
+  let cleanCategory = Array.isArray(category) ? category.join(',') : category;
+  if (cleanCategory.startsWith('[') && cleanCategory.endsWith(']')) {
+    cleanCategory = cleanCategory.slice(1, -1);
+  }
+
   return {
-    category: Array.isArray(category) ? category.join(',') : category,
+    category: cleanCategory,
     path: clientLibFolder,
     embeds,
     dependencies,
     assets,
-    nodeType: jcrRoot['jcr:primaryType'],
-    allowProxy: jcrRoot.allowProxy === 'true' || jcrRoot.allowProxy === true,
-    longCacheKey: jcrRoot.longCacheKey || undefined,
+    nodeType: attributes['jcr:primaryType'],
+    allowProxy: attributes.allowProxy === 'true' || attributes.allowProxy === '{Boolean}true',
+    longCacheKey: attributes.longCacheKey || undefined,
   };
 }
 
@@ -324,6 +341,11 @@ function parseStringArray(value: string | string[] | undefined): string[] {
   if (!value) return [];
   if (Array.isArray(value)) return value;
   if (typeof value === 'string') {
+    // Handle AEM array format: [item1,item2,item3]
+    if (value.startsWith('[') && value.endsWith(']')) {
+      const inner = value.slice(1, -1);
+      return inner.split(',').map(s => s.trim()).filter(Boolean);
+    }
     // Handle comma-separated or space-separated values
     return value.split(/[,\s]+/).filter(Boolean);
   }
