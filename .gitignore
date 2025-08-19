@@ -3,4 +3,4 @@ dist/
 report*/
 .DS_Store
 *.log
-
+.env

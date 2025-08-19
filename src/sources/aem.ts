@@ -82,72 +82,83 @@ async function tryGetFirstJson(client: AxiosInstance, paths: string[]): Promise<
   return undefined;
 }
 
-function collectResourceTypes(node: Record<string, unknown>, out: Set<string>): void {
-  const rt = node['sling:resourceType'];
-  if (typeof rt === 'string' && rt.trim()) out.add(rt);
-  for (const value of Object.values(node)) {
-    if (value && typeof value === 'object') {
-      if (Array.isArray(value)) {
-        for (const item of value) if (item && typeof item === 'object') collectResourceTypes(item as Record<string, unknown>, out);
-      } else {
-        collectResourceTypes(value as Record<string, unknown>, out);
-      }
+async function findComponentsByGroup(client: AxiosInstance, groupName: string): Promise<string[]> {
+  console.log(chalk.blue(`Finding components for group: ${groupName}`));
+  
+  // Get all components from /apps and /libs
+  const components = new Set<string>();
+  
+  // Try /apps/wknd/components.infinity.json
+  const appsJson = await tryGetFirstJson(client, [
+    '/apps/wknd/components.infinity.json'
+  ]);
+  
+  if (appsJson && typeof appsJson === 'object') {
+    scanForComponents(appsJson as Record<string, unknown>, '/apps/wknd/components', components, groupName);
+  }
+  
+  // Try /libs/wknd/components.infinity.json
+  const libsJson = await tryGetFirstJson(client, [
+    '/libs/wknd/components.infinity.json'
+  ]);
+  
+  if (libsJson && typeof libsJson === 'object') {
+    scanForComponents(libsJson as Record<string, unknown>, '/libs/wknd/components', components, groupName);
+  }
+  
+  const result = Array.from(components).sort();
+  console.log(chalk.blue(`Found ${result.length} components in group ${groupName}:`));
+  for (const comp of result) {
+    console.log(chalk.gray(`  - ${comp}`));
+  }
+  
+  return result;
+}
+
+function scanForComponents(node: Record<string, unknown>, path: string, out: Set<string>, groupName: string) {
+  // Check if this is a component node
+  if (typeof node['jcr:primaryType'] === 'string' && 
+      node['jcr:primaryType'] === 'cq:Component' &&
+      typeof node['componentGroup'] === 'string' &&
+      node['componentGroup'] === groupName) {
+    out.add(path);
+  }
+  
+  // Recurse into child nodes
+  for (const [key, value] of Object.entries(node)) {
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      scanForComponents(value as Record<string, unknown>, `${path}/${key}`, out, groupName);
     }
   }
 }
 
-function findPoliciesByType(root: Record<string, unknown>, type: string, path: string = '/', out: PolicyInfo[] = []): PolicyInfo[] {
-  // Debug the current node
-  console.log(chalk.gray(`Checking node at ${path}`));
-  if (typeof root['jcr:title'] === 'string') {
-    console.log(chalk.gray(`Node title: ${root['jcr:title']}`));
-  }
-  if (typeof root['sling:resourceType'] === 'string') {
-    console.log(chalk.gray(`Resource type: ${root['sling:resourceType']}`));
-  }
-
-  // Look for policy nodes
-  if (typeof root['sling:resourceType'] === 'string' && 
-      root['sling:resourceType'].includes('policy/policy')) {
-    
-    // Check if this is under the type we want
-    const pathParts = path.split('/');
-    const isUnderType = pathParts.some(part => part === type);
-    
-    console.log(chalk.gray(`Found policy at ${path}, path parts: ${pathParts.join(', ')}, looking for: ${type}`));
-    
-    if (isUnderType) {
-      console.log(chalk.blue(`Found ${type} policy at ${path}`));
+async function expandComponentGroups(client: AxiosInstance, components: string[]): Promise<string[]> {
+  const expanded = new Set<string>();
+  
+  for (const component of components) {
+    if (component.startsWith('group:')) {
+      // Extract group name (remove 'group:' prefix)
+      const groupName = component.substring(6);
       
-      const clientlibs = Array.isArray(root['clientlibs']) ? 
-        root['clientlibs'].filter((c): c is string => typeof c === 'string') : 
-        undefined;
+      // Find all components with this componentGroup
+      const groupComponents = await findComponentsByGroup(client, groupName);
       
-      const components = Array.isArray(root['components']) ?
-        root['components'].filter((c): c is string => typeof c === 'string') :
-        undefined;
-
-      if (clientlibs) console.log(chalk.blue(`Found clientlibs: ${clientlibs.join(', ')}`));
-      if (components) console.log(chalk.blue(`Found components: ${components.join(', ')}`));
-
-      out.push({
-        path,
-        type,
-        clientlibs,
-        components,
-        config: root
-      });
+      if (groupComponents.length > 0) {
+        console.log(chalk.gray(`Expanding group ${component} into ${groupComponents.length} components`));
+        for (const c of groupComponents) {
+          expanded.add(c);
+        }
+      } else {
+        // Keep the group reference if we couldn't expand it
+        console.log(chalk.yellow(`Could not expand group ${component}`));
+        expanded.add(component);
+      }
+    } else {
+      expanded.add(component);
     }
   }
-
-  // Recurse into children
-  for (const [key, value] of Object.entries(root)) {
-    if (value && typeof value === 'object' && !Array.isArray(value)) {
-      findPoliciesByType(value as Record<string, unknown>, type, `${path}${key}/`, out);
-    }
-  }
-
-  return out;
+  
+  return Array.from(expanded).sort();
 }
 
 export async function collectPageAndTemplateData(opts: AemCollectorOptions): Promise<AemDataBundle> {
@@ -176,7 +187,7 @@ export async function collectPageAndTemplateData(opts: AemCollectorOptions): Pro
   console.log(chalk.blue('Fetching page content...'));
   const jcrContent = await tryGetFirstJson(client, [
     `${opts.contentPath}/jcr:content.infinity.json`,
-    `${opts.contentPath}/_jcr_content.infinity.json`,
+    `${opts.contentPath}/_jcr:content.infinity.json`,
     `${opts.contentPath}.infinity.json`,
   ]);
   
@@ -191,6 +202,26 @@ export async function collectPageAndTemplateData(opts: AemCollectorOptions): Pro
       page.template = templatePath;
       template.path = templatePath;
       pagesByTemplate.template = templatePath;
+
+      // Get the template's policy mapping
+      console.log(chalk.blue('\nFetching template policy mapping...'));
+      const policyMapping = await tryGetFirstJson(client, [
+        `${templatePath}/policies/jcr:content.infinity.json`
+      ]);
+      
+      if (policyMapping && typeof policyMapping === 'object') {
+        console.log(chalk.gray('Policy mapping:', JSON.stringify(policyMapping, null, 2)));
+        
+        // Extract components from root/container
+        const rootComponents = extractComponentsFromPolicy(policyMapping as Record<string, unknown>);
+        if (rootComponents.length > 0) {
+          console.log(chalk.blue(`Found root components: ${rootComponents.join(', ')}`));
+          
+          // Expand any component groups
+          const expanded = await expandComponentGroups(client, rootComponents);
+          template.allowedComponents.push(...expanded);
+        }
+      }
     }
 
     // Collect components used on the page
@@ -198,100 +229,6 @@ export async function collectPageAndTemplateData(opts: AemCollectorOptions): Pro
     collectResourceTypes(root, componentSet);
     page.componentsUsed = Array.from(componentSet).sort();
     console.log(chalk.blue(`Found components: ${page.componentsUsed.join(', ')}`));
-  }
-
-  // 2) If we found a template, fetch its structure and policies
-  if (template.path) {
-    // Extract conf path from template path
-    const confPath = template.path.split('/settings/wcm/templates/')[0];
-    console.log(chalk.blue(`\nTemplate conf path: ${confPath}`));
-
-    // First check policies directory
-    console.log(chalk.blue('\nFetching policies directory...'));
-    const policiesRoot = await tryGetFirstJson(client, [
-      `${confPath}/settings/wcm/policies.infinity.json`
-    ]);
-    
-    if (policiesRoot && typeof policiesRoot === 'object') {
-      // Look for page policy
-      const pagePolicies = findPoliciesByType(policiesRoot as Record<string, unknown>, 'page');
-      for (const policy of pagePolicies) {
-        console.log(chalk.blue(`Found page policy: ${policy.path}`));
-        if (policy.clientlibs) {
-          console.log(chalk.blue(`Found clientlibs: ${policy.clientlibs.join(', ')}`));
-          template.policies[policy.path] = {
-            categories: policy.clientlibs,
-            config: policy.config
-          };
-        }
-      }
-
-      // Look for container/parsys policies
-      const containerPolicies = findPoliciesByType(policiesRoot as Record<string, unknown>, 'container');
-      for (const policy of containerPolicies) {
-        console.log(chalk.blue(`Found container policy: ${policy.path}`));
-        if (policy.components) {
-          console.log(chalk.blue(`Found allowed components: ${policy.components.join(', ')}`));
-          template.allowedComponents.push(...policy.components);
-          template.policies[policy.path] = {
-            categories: extractClientlibCategories(policy.config),
-            config: policy.config
-          };
-        }
-      }
-    }
-
-    // Then check template structure
-    console.log(chalk.blue('\nFetching template structure...'));
-    const tplStruct = await tryGetFirstJson(client, [
-      `${template.path}/structure/jcr:content.infinity.json`,
-    ]);
-    console.log(chalk.gray('Template structure:', JSON.stringify(tplStruct, null, 2)));
-
-    if (tplStruct && typeof tplStruct === 'object') {
-      // Look for root container policy
-      const rootPolicy = (tplStruct as any)?.['jcr:content']?.['cq:policy'];
-      if (rootPolicy) {
-        console.log(chalk.blue(`Found root policy: ${rootPolicy}`));
-        const policyJson = await tryGetFirstJson(client, [
-          `${confPath}/settings/wcm/policies/${rootPolicy}.infinity.json`
-        ]);
-        if (policyJson && typeof policyJson === 'object') {
-          console.log(chalk.gray('Policy JSON:', JSON.stringify(policyJson, null, 2)));
-          const components = extractAllowedComponents(policyJson as Record<string, unknown>);
-          template.allowedComponents.push(...components);
-          template.policies[rootPolicy] = {
-            categories: extractClientlibCategories(policyJson as Record<string, unknown>),
-            config: policyJson as Record<string, unknown>
-          };
-        }
-      }
-
-      // Look for container components and their policies
-      const containers = findContainers(tplStruct as Record<string, unknown>);
-      console.log(chalk.blue(`\nFound containers: ${containers.map(c => c.path).join(', ')}`));
-      
-      for (const container of containers) {
-        if (container.policy) {
-          console.log(chalk.blue(`Fetching container policy: ${container.policy}`));
-          const policyJson = await tryGetFirstJson(client, [
-            `${confPath}/settings/wcm/policies/${container.policy}.infinity.json`
-          ]);
-          if (policyJson && typeof policyJson === 'object') {
-            console.log(chalk.gray('Container policy JSON:', JSON.stringify(policyJson, null, 2)));
-            const components = extractAllowedComponents(policyJson as Record<string, unknown>);
-            template.allowedComponents.push(...components);
-            template.policies[container.policy] = {
-              categories: extractClientlibCategories(policyJson as Record<string, unknown>),
-              config: policyJson as Record<string, unknown>
-            };
-          }
-        }
-      }
-    }
-
-    // Dedupe allowed components
-    template.allowedComponents = Array.from(new Set(template.allowedComponents)).sort();
   }
 
   return { page, template, pagesByTemplate };
@@ -312,94 +249,55 @@ function extractTemplatePath(root: Record<string, unknown>): string | undefined 
   return undefined;
 }
 
-interface ContainerInfo {
-  path: string;
-  resourceType: string;
-  policy?: string;
-}
-
-function findContainers(node: Record<string, unknown>, path: string = '/', out: ContainerInfo[] = []): ContainerInfo[] {
-  const resourceType = node['sling:resourceType'];
-  if (typeof resourceType === 'string' && 
-      (resourceType.includes('/container') || 
-       resourceType.includes('/parsys') || 
-       resourceType.includes('/responsivegrid'))) {
-    const policy = node['cq:policy'];
-    out.push({
-      path,
-      resourceType,
-      policy: typeof policy === 'string' ? policy : undefined
-    });
-  }
-
-  for (const [key, value] of Object.entries(node)) {
-    if (value && typeof value === 'object' && !Array.isArray(value)) {
-      findContainers(value as Record<string, unknown>, `${path}${key}/`, out);
-    }
-  }
-  return out;
-}
-
-function extractAllowedComponents(policyJson: Record<string, unknown>): string[] {
+function extractComponentsFromPolicy(policyMapping: Record<string, unknown>): string[] {
   const components = new Set<string>();
-
-  const addComponent = (val: unknown) => {
-    if (typeof val === 'string' && val.includes('/')) {
-      console.log(chalk.gray(`Found allowed component: ${val}`));
-      components.add(val.trim());
-    }
-  };
-
-  const scan = (obj: Record<string, unknown>) => {
-    // Look for components map (key -> true)
-    if (obj.components && typeof obj.components === 'object') {
-      console.log(chalk.gray('Found components object:', obj.components));
-      const comps = obj.components as Record<string, unknown>;
-      for (const [key, value] of Object.entries(comps)) {
-        if (value === true || value === 'true') addComponent(key);
+  
+  // Helper to add components from various formats
+  const addComponents = (value: unknown) => {
+    if (typeof value === 'string') {
+      // Single component or group reference
+      if (value.startsWith('/') || value.startsWith('group:')) {
+        components.add(value);
       }
-    }
-
-    // Look for arrays of allowed components
-    for (const [key, value] of Object.entries(obj)) {
-      if (key.toLowerCase().includes('allowed') && Array.isArray(value)) {
-        console.log(chalk.gray(`Found allowed array in key: ${key}`, value));
-        for (const item of value) addComponent(item);
-      }
-      if (value && typeof value === 'object' && !Array.isArray(value)) {
-        scan(value as Record<string, unknown>);
+    } else if (Array.isArray(value)) {
+      // Array of components/groups
+      for (const item of value) {
+        if (typeof item === 'string' && (item.startsWith('/') || item.startsWith('group:'))) {
+          components.add(item);
+        }
       }
     }
   };
-
-  scan(policyJson);
+  
+  // Look in root/container
+  const root = policyMapping['root'];
+  if (root && typeof root === 'object') {
+    const rootObj = root as Record<string, unknown>;
+    
+    // Check root components
+    addComponents(rootObj['components']);
+    
+    // Check container components
+    const container = rootObj['container'];
+    if (container && typeof container === 'object') {
+      const containerObj = container as Record<string, unknown>;
+      addComponents(containerObj['components']);
+    }
+  }
+  
   return Array.from(components).sort();
 }
 
-function extractClientlibCategories(policyJson: Record<string, unknown>): string[] {
-  const candidates: string[] = [];
-  const add = (val: unknown) => {
-    if (typeof val === 'string' && val.trim()) candidates.push(val.trim());
-    if (Array.isArray(val)) for (const v of val) if (typeof v === 'string' && v.trim()) candidates.push(v.trim());
-  };
-  const keys = [
-    'clientlibs',
-    'clientLibs',
-    'allowedClientlibCategories',
-    'allowedClientlibs',
-    'allowedClientlibsCategories',
-    'categories',
-    'clientlibsCategories',
-  ];
-  const scan = (obj: Record<string, unknown>) => {
-    for (const [k, v] of Object.entries(obj)) {
-      if (keys.includes(k)) {
-        console.log(chalk.gray(`Found clientlib key: ${k} with value:`, v));
-        add(v);
+function collectResourceTypes(node: Record<string, unknown>, out: Set<string>): void {
+  const rt = node['sling:resourceType'];
+  if (typeof rt === 'string' && rt.trim()) out.add(rt);
+  for (const value of Object.values(node)) {
+    if (value && typeof value === 'object') {
+      if (Array.isArray(value)) {
+        for (const item of value) if (item && typeof item === 'object') collectResourceTypes(item as Record<string, unknown>, out);
+      } else {
+        collectResourceTypes(value as Record<string, unknown>, out);
       }
-      if (v && typeof v === 'object' && !Array.isArray(v)) scan(v as Record<string, unknown>);
     }
-  };
-  scan(policyJson);
-  return Array.from(new Set(candidates)).sort();
+  }
 }
