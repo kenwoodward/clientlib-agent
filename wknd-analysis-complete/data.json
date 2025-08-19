@@ -1,0 +1,107 @@
+{
+  "aemData": {
+    "page": {
+      "path": "/content/wknd/us/en",
+      "componentsUsed": []
+    },
+    "template": {
+      "allowedComponents": [],
+      "policies": {}
+    },
+    "pagesByTemplate": {
+      "pagePaths": []
+    }
+  },
+  "repoData": {
+    "clientlibs": [],
+    "htlInclusions": [
+      {
+        "file": "ui.apps/target/classes/apps/wknd/components/xfpage/customfooterlibs.html",
+        "category": "wknd.base",
+        "type": "js"
+      },
+      {
+        "file": "ui.apps/target/classes/apps/wknd/components/xfpage/customfooterlibs.html",
+        "category": "wknd.base",
+        "type": "js"
+      },
+      {
+        "file": "ui.apps/target/classes/apps/wknd/components/xfpage/customheaderlibs.html",
+        "category": "wknd.base",
+        "type": "css"
+      },
+      {
+        "file": "ui.apps/target/classes/apps/wknd/components/xfpage/customheaderlibs.html",
+        "category": "wknd.base",
+        "type": "css"
+      },
+      {
+        "file": "ui.apps/src/main/content/jcr_root/apps/wknd/components/xfpage/customfooterlibs.html",
+        "category": "wknd.base",
+        "type": "js"
+      },
+      {
+        "file": "ui.apps/src/main/content/jcr_root/apps/wknd/components/xfpage/customfooterlibs.html",
+        "category": "wknd.base",
+        "type": "js"
+      },
+      {
+        "file": "ui.apps/src/main/content/jcr_root/apps/wknd/components/xfpage/customheaderlibs.html",
+        "category": "wknd.base",
+        "type": "css"
+      },
+      {
+        "file": "ui.apps/src/main/content/jcr_root/apps/wknd/components/xfpage/customheaderlibs.html",
+        "category": "wknd.base",
+        "type": "css"
+      }
+    ],
+    "templateCategoryRefs": [
+      {
+        "file": "ui.apps/target/classes/apps/wknd/components/xfpage/customfooterlibs.html",
+        "category": "wknd.base",
+        "context": "component-config"
+      },
+      {
+        "file": "ui.apps/target/classes/apps/wknd/components/xfpage/customheaderlibs.html",
+        "category": "wknd.base",
+        "context": "component-config"
+      },
+      {
+        "file": "ui.apps/src/main/content/jcr_root/apps/wknd/components/xfpage/customfooterlibs.html",
+        "category": "wknd.base",
+        "context": "component-config"
+      },
+      {
+        "file": "ui.apps/src/main/content/jcr_root/apps/wknd/components/xfpage/customheaderlibs.html",
+        "category": "wknd.base",
+        "context": "component-config"
+      }
+    ],
+    "dependencyGraph": {
+      "nodes": [],
+      "edges": [],
+      "circular": [],
+      "unused": [],
+      "duplicates": []
+    }
+  },
+  "correlated": {
+    "componentToCategories": {},
+    "missingCategories": []
+  },
+  "recommendation": {
+    "prioritizedSteps": [
+      {
+        "title": "Configure OPENAI_API_KEY to enable LLM recommendations",
+        "rationale": "No API key detected",
+        "impact": "low"
+      }
+    ],
+    "proposedCategories": [],
+    "policyUpdates": [],
+    "risks": [
+      "LLM not executed; using static fallback"
+    ]
+  }
+}
